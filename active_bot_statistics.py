@@ -11,15 +11,19 @@ LOSSES, OR LEGAL ISSUES ARISING FROM THE USE OF THIS SCRIPT.
 Description:
 This script retrieves statistics about active bots on a MediaWiki site
 and generates a table containing their information, including username,
-last edit time, edit count, and bot groups. The script then updates a
-designated wiki page with the generated table.
+last edit time, edit count, bot groups and registration date.
+The script then updates a designated wiki page with the generated table.
 
 Dependencies:
+- pymysql: A Python library for MySQL database interactions.
+Documentation: [https://pymysql.readthedocs.io/en/latest/]
+
 - pywikibot: A Python library to interact with MediaWiki wikis.
+Documentation: [https://www.mediawiki.org/wiki/Manual:Pywikibot]
 
 Usage:
 1. Configure the parameters below according to your project's needs.
-2. Tranlsate some strings into your language (such as: table headers, namespaces, etc.)
+2. Tranlsate some strings into your language (such as: table headers, etc.)
 3. Run the script to retrieve and generate statistics for active bots.
 4. The generated table is updated on a specified wiki page.
 
@@ -29,201 +33,167 @@ and may require adjustments for other wikis.
 """
 #
 # Authors: (C) User:Aram, 2023
-# Last Updated: 21 August 2023
+# Last Updated: 1 November 2023
 # License: Distributed under the terms of the MIT license.
-# Version: 1.0
+# Version: 1.1
 #
 
+import pymysql
 import pywikibot
-import re
-from datetime import datetime, timedelta
 import logging
+import re
 
 # Configuration Parameters
-SITE_LANG = 'ckb'  # Language code for the site
-SITE_FAMILY = 'wikipedia'  # Family name for the site
-ACTIVE_THRESHOLD_MONTHS = 6  # Months to consider bots as active
-BATCH_SIZE = 50  # Number of users to retrieve in each API request
-BOT_USERNAME = 'BOT_USERNAME'  # Username of the bot making the update
-PAGE_TITLE = 'ویکیپیدیا:ڕاپۆرتی بنکەدراوە/پێڕستی بۆتە چالاکەکان'  # Title of the target statistics page
-EDIT_SUMMARY = 'بۆت: نوێکردنەوە'  # Edit summary for page updates
+site_lang = 'ckb'  # Language code for the target site
+site_family = 'wikipedia'  # Family name for the target site
+bot_username = 'AramBot'  # Username of the bot making the update
+page_title = 'ویکیپیدیا:ڕاپۆرتی بنکەدراوە/پێڕستی بۆتە چالاکەکان'  # Title of the target statistics page
+edit_summary = 'بۆت: نوێکردنەوە'  # Edit summary for page updates
 
-# Configure Logging
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Database connection details
+# Note: If you are using Toolforge, you may ignore the database username and password
+db_hostname_format = "ckbwiki.analytics.db.svc.wikimedia.cloud"  # Hostname of the database server
+db_port = 3306  # Port number for the database server
+# db_username = ""  # Add your actual database username credential (if not using Toolforge)
+# db_password = ""  # Add your actual database password credential (if not using Toolforge)
+db_name_format = "ckbwiki_p"  # Name of the target database
+db_connect_file = "~/replica.my.cnf" # path to the "my.cnf" file
 
-def retrieve_bot_statistics(site, batch_size=BATCH_SIZE):
-    logger.info(f"Retrieving bot statistics from {site.hostname()}...\n")
-    bot_statistics = []
-    continue_token = None
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("ActiveBotsLogger")
 
-    while True:
-        query_params = {
-            'list': 'allusers',
-            'augroup': 'bot',
-            'auwitheditsonly': True,
-            'aulimit': batch_size,
-            'action': 'query',
-            'aucontinue': continue_token
+# Create a connection to the database
+try:
+    connection = pymysql.connect(
+        host=db_hostname_format,
+        port=db_port,
+        # user=db_username,
+        # password=db_password,
+        read_default_file=db_connect_file, # "my.cnf" file contains user and password and read these parameters from under the [client] section.
+        charset='utf8'
+    )
+
+    # Define a function to convert numerals to Eastern Arabic numerals
+    def convert_numerals(text):
+        eastern_arabic_numerals = {
+            '0': '٠', '1': '١', '2': '٢', '3': '٣', '4': '٤', '5': '٥', '6': '٦', '7': '٧', '8': '٨', '9': '٩'
+        }
+        return ''.join(eastern_arabic_numerals[char] if char in eastern_arabic_numerals else char for char in text)
+
+    # Define a function to format a date with the desired format and optional link
+    def format_date(date, link=None):
+        months = {
+            'January': 'کانوونی دووەم', 'February': 'شوبات', 'March': 'ئازار', 'April': 'نیسان', 'May': 'ئایار', 'June': 'حوزەیران',
+            'July': 'تەممووز', 'August': 'ئاب', 'September': 'ئەیلوول', 'October': 'تشرینی یەکەم', 'November': 'تشرینی دووەم', 'December': 'کانوونی یەکەم'
         }
 
-        request = pywikibot.data.api.Request(site=site, parameters=query_params)
-        result = request.submit()
-
-        # print("Result:", result)  # Print the result for debugging
-
-        if 'query' in result and 'allusers' in result['query']:
-            bot_list = result['query']['allusers']
-            for bot in bot_list:
-                username = bot['name']
-                latest_edit = get_latest_edit_time(site, username)
-                edit_count = get_bot_edit_count(site, username)
-                bot_statistics.append((username, latest_edit, edit_count))
-
-        if 'continue' in result:
-            continue_token = result['continue']['aucontinue']
+        date_parts = date.split()
+        formatted_date = f'{convert_numerals(date_parts[2])}ی {months[date_parts[1]]}ی {convert_numerals(date_parts[0])}'
+        if link:
+            return f'[[{link}|{formatted_date}]]'
         else:
-            break
+            return formatted_date
 
-    logger.info("Bot statistics retrieved successfully!\n")
-    return bot_statistics
+    cursor = connection.cursor()
+    cursor.execute("USE ckbwiki_p;")
 
-def get_latest_edit_time(site, username):
-    user = pywikibot.User(site, username)
-    contributions = list(user.contributions(total=1))  # Get all contributions
-
-    # print("Contributions:", contributions)  # Print contributions for debugging
-
-    if contributions:
-        timestamp = contributions[0][2]
-        formatted_time = timestamp.strftime('%d %B %Y')
-        return formatted_time
-
-    return 'N/A'
-
-def get_bot_edit_count(site, username):
-    user = pywikibot.User(site, username)
-    edit_count = 0
-
-    for _ in user.contributions(total=None):  # Remove the total limit
-        edit_count += 1
-
-    return edit_count
-
-def is_active(last_edit_time, active_threshold_months=6):
-    if last_edit_time == 'N/A':
-        return False
-
-    now = datetime.utcnow()
-    last_edit = datetime.strptime(last_edit_time, '%d %B %Y')
-    time_since_last_edit = now - last_edit
-    return time_since_last_edit <= timedelta(days=active_threshold_months * 30)
-
-def retrieve_active_bots(statistics, active_threshold_months=6):
-    return [(username, last_edit, edit_count) for username, last_edit, edit_count in statistics if is_active(last_edit, active_threshold_months)]
-
-def generate_statistics_table(statistics):
-    logger.info("Generating statistics table...\n")
-    months = {
-        'January': 'کانوونی دووەم', 'February': 'شوبات', 'March': 'ئازار', 'April': 'نیسان', 'May': 'ئایار', 'June': 'حوزەیران',
-        'July': 'تەممووز', 'August': 'ئاب', 'September': 'ئەیلوول', 'October': 'تشرینی یەکەم', 'November': 'تشرینی دووەم', 'December': 'کانوونی یەکەم'
-    }
+    query = """
+    WITH ActiveBotsData AS (
+        SELECT
+            actor_name AS Username,
+            MAX(rev_timestamp) AS LastEditTimestamp,
+            COUNT(rev_id) AS NumberOfEdits,
+            GROUP_CONCAT(DISTINCT actor_user_groups.ug_group) AS BotGroups,
+            user_registration AS RegistrationTimestamp
+        FROM revision
+        JOIN actor ON actor_id = rev_actor
+        JOIN user ON actor_user = user_id
+        LEFT JOIN user_groups AS actor_user_groups ON user_id = actor_user_groups.ug_user
+        WHERE actor_user_groups.ug_group LIKE '%bot%'
+        GROUP BY Username
+        HAVING LastEditTimestamp >= DATE_FORMAT(NOW() - INTERVAL 30 DAY, '%Y%m%d%H%i%s')  -- Change '30 DAY' to the desired activity threshold
+    )
     
-    eastern_arabic_numerals = {
-        '0': '٠', '1': '١', '2': '٢', '3': '٣', '4': '٤', '5': '٥', '6': '٦', '7': '٧', '8': '٨', '9': '٩'
-    }
+    SELECT
+        ROW_NUMBER() OVER (ORDER BY LastEditTimestamp DESC) AS '#',
+        Username,
+        DATE_FORMAT(LastEditTimestamp, '%Y %M %e') AS LastEditDate,
+        NumberOfEdits,
+        BotGroups,
+        DATE_FORMAT(RegistrationTimestamp, '%Y %M %e') AS RegistrationDate
+    FROM ActiveBotsData
+    ORDER BY LastEditTimestamp DESC;
+    """
+
+    cursor.execute(query)
+    results = cursor.fetchall()
+    decoded_results = []
+
+    for row in results:
+        decoded_row = [item.decode('utf-8') if isinstance(item, bytes) else str(item) for item in row]
+        decoded_results.append(decoded_row)
+
+    cursor.close()
+    connection.close()
+
+    site = pywikibot.Site(site_lang, site_family)
+    target_page = pywikibot.Page(site, page_title)
     
-    # Sort the statistics list based on the entire date in ascending order
-    sorted_statistics = sorted(statistics, key=lambda x: datetime.strptime(x[1], '%d %B %Y'), reverse=True)
-    
-    site = pywikibot.Site(SITE_LANG, SITE_FAMILY)
-    
-    bot_groups = retrieve_bot_groups(site, sorted_statistics)
-    
-    table = '{{ویکیپیدیا:ڕاپۆرتی بنکەدراوە/پێڕستی بۆتە ناچالاکەکان}}\n'
+    logger.info(f"Retrieving active bot statistics from {site.hostname()} database...")
+
+    table = '{{ئەمانەش ببینە|ویکیپیدیا:ڕاپۆرتی بنکەدراوە/پێڕستی بۆتە ناچالاکەکان}}\n'
     table += '{{چینی ناوەند}}\n'
     table += 'پێرستی [[وپ:بۆت|بۆت]]ە چالاکەکانی ویکیپیدیا{{ھن}}\n'
-    table += 'بۆتی چالاک بە بۆتێک دەڵێن کە لە ٦ مانگی ڕابردوو لانی کەم [[تایبەت:بەشدارییەکان|بەشدارییەکی]] ھەبووە.{{ھن}}\n'
-    table += 'لە ئێستادا ئەم ئامارە ھەفتانە نوێ دەکرێتەوە.{{ھن}}\n'
-    table += "'''دوایین نوێکردنەوە لەلایەن {{subst:بب|" + BOT_USERNAME + "}}'''؛ لە ''~~~~~''\n"
-    table += '{{کۆتایی}}\n\n'
+    table += 'بۆتی چالاک بە بۆتێک دەڵێن کە لە ٣٠ ڕۆژی ڕابردوو لانی کەم [[تایبەت:بەشدارییەکان|بەشدارییەکی]] ھەبووە.{{ھن}}\n'
+    table += 'لە ئێستادا ئەم ئامارە ڕۆژانە نوێ دەکرێتەوە.{{ھن}}\n'
+    table += "'''دوایین نوێکردنەوە لەلایەن {{subst:بب|" + bot_username + "}}'''؛ لە ''~~~~~''\n"
+    table += '{{کۆتایی}}\n'
+
+    if decoded_results:
+        logger.info("Active bot statistics retrieved successfully!")
+
+        table += "{| class=\"wikitable sortable\" style=\"margin: auto;\"\n"
+        table += "|+ بۆتە چالاکەکان\n"
+        table += "|-\n"
+        table += "! # !! بەکارھێنەر !! دوایین دەستکاری !! ژمارەی دەستکارییەکان !! مافەکان !! ڕێکەوتی خۆتۆمارکردن\n"
+
+        for row in decoded_results:
+            rank, username, last_edit_date, num_edits, bot_groups, reg_date = row
+            rank = convert_numerals(str(rank))
+            num_edits = convert_numerals(str(num_edits))
+            last_edit_date = format_date(last_edit_date, link=f'تایبەت:بەشدارییەکان/{username}')
+            reg_date = format_date(reg_date)
+
+            table += "|-\n"
+            table += f"| {rank} || [[بەکارھێنەر:{username}|{username}]] || {last_edit_date} || {num_edits} || {bot_groups} || {reg_date}\n"
+
+        table += "|}\n"
+        table += '\n[[پۆل:ڕاپۆرتی بنکەدراوەی ویکیپیدیا]]'
+
+        # Define the update_page function
+        def update_page(page, table_content):
+            try:
+                # Remove the timestamp from the existing page content
+                existing_content_without_timestamp = re.sub(r".+دوایین نوێکردنەوە لەلایەن.+", '', page.text).strip()
+
+                # Remove the timestamp from the new table content
+                new_content_without_timestamp = re.sub(r".+دوایین نوێکردنەوە لەلایەن.+", '', table_content).strip()
+
+                if new_content_without_timestamp != existing_content_without_timestamp:
+                    page.text = table_content
+                    page.save(summary=edit_summary, minor=True, botflag=True)
+                    logger.info("Page updated successfully!")
+                else:
+                    logger.info("No changes needed. The page is already up to date.")
+            except Exception as e:
+                logger.error("An error occurred while updating the page: %s", e)
+
+        # Use the update_page function to update the page
+        update_page(target_page, table)
+        logger.info("Script terminated successfully.\n\n")
+    else:
+        logger.info("No results found from the query.")
+except Exception as e:
+    logger.error("An error occurred: %s", str(e))
     
-    table += '{| class="wikitable sortable" style="margin: auto;"\n'
-    table += '! # !! بەکارھێنەر !! دوایین دەستکاری !! ژمارەی دەستکارییەکان !! مافەکان\n'
-
-    for i, (username, last_edit, edit_count) in enumerate(sorted_statistics, start=1):
-        day, month_name, year = last_edit.split(" ")
-        month = months[month_name]
-        
-        day = ''.join(eastern_arabic_numerals[digit] for digit in day if digit != '0')
-        year = ''.join(eastern_arabic_numerals[digit] for digit in year)
-        num = ''.join(eastern_arabic_numerals[digit] for digit in str(i))
-        
-        formatted_date = f'{day}ی {month}ی {year}'
-        edit_count = ''.join(eastern_arabic_numerals[digit] for digit in str(get_bot_edit_count(site, username)))
-        bot_group = bot_groups.get(username, 'Unknown')
-        
-        table += '|-\n'
-        table += f'| {num} || [[بەکارھێنەر:{username}|{username}]] || [[تایبەت:بەشدارییەکان/{username}|{formatted_date}]] || {edit_count} || {bot_group}\n'
-
-    table += '|}'
-    table += '\n\n[[پۆل:ڕاپۆرتی بنکەدراوەی ویکیپیدیا]]'
-
-    logger.info("Table generated successfully!\n")
-    return table
-
-def retrieve_bot_groups(site, statistics):
-    bot_groups = {}
-
-    for username, _, _ in statistics:
-        user = pywikibot.User(site, username)
-        groups = user.groups()
-
-        if 'bot' in groups:
-            groups.remove('*') # Remove the default group
-            bot_groups[username] = ', '.join(groups)
-            if 'bot' not in bot_groups[username]:
-                bot_groups[username] = 'bot, ' + bot_groups[username]
-
-    return bot_groups
-
-def edit_statistics_page(page, table_content):
-    try:
-        # Remove the timestamp from the existing page content
-        existing_content_without_timestamp = re.sub(r".+دوایین نوێکردنەوە لەلایەن.+", '', page.text).strip()
-
-        # Remove the timestamp from the new table content
-        new_content_without_timestamp = re.sub(r".+دوایین نوێکردنەوە لەلایەن.+", '', table_content).strip()
-
-        if new_content_without_timestamp != existing_content_without_timestamp:
-            page.text = table_content
-            page.save(summary=EDIT_SUMMARY, minor=True, botflag=True)
-            logger.info("Wiki page updated successfully!\n")
-        else:
-            logger.info("No changes needed. The wiki page is already up to date.\n")
-    except Exception as e:
-        logger.error("An error occurred while updating the wiki page: %s", e)
-
-def main():
-    site = pywikibot.Site(SITE_LANG, SITE_FAMILY)
-    try:
-        bot_statistics = retrieve_bot_statistics(site)
-        active_bots = retrieve_active_bots(bot_statistics)
-
-        if not active_bots:
-            logger.info("No active bots found.")
-            return
-
-        statistics_table = generate_statistics_table(active_bots)
-
-        page = pywikibot.Page(site, PAGE_TITLE)
-
-        edit_statistics_page(page, statistics_table)
-    except Exception as e:
-        logger.error("An error occurred: %s\n", e)
-        return  # Exit the function if an error occurs
-
-    logger.info("Script completed successfully.")
-
-if __name__ == '__main__':
-    main()
