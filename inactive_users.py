@@ -146,7 +146,7 @@ def main():
         # Set up page_top and page_bottom
         page_top = '{{/سەرپەڕە}}\n'
         page_top += '{{چینی ناوەند}}\n'
-        page_top += "'''دوایین نوێکردنەوە لەلایەن {{subst:بب|" + bot_username + "}}'''؛ لە <onlyinclude>~~~~~</onlyinclude>\n"
+        page_top += "<onlyinclude>'''دوایین نوێکردنەوە لەلایەن {{subst:بب|" + bot_username + "}}'''؛ لە ~~~~~</onlyinclude>\n"
         page_top += '{{کۆتایی}}\n'
 
         page_bottom = '\n[[پۆل:ڕاپۆرتی بنکەدراوەی ویکیپیدیا]]'
