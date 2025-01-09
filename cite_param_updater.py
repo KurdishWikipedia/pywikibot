@@ -130,10 +130,9 @@ class CiteParamUpdaterBot(
         # Loop through the mapping dictionary containing old and new parameter names.
         for old_param, new_param in self.mapping_dict.items():
             if '#' in old_param:
-                # Remove the hash symbol to get the base parameter name (e.g., 'first#' becomes 'first').
-                param_base = old_param.replace('#', '')
-                # Create a regex pattern to match the parameter base followed by an optional number (e.g., 'first' or 'first2').
-                param_pattern = re.escape(param_base) + r'(\d*)'
+                # Create pattern by escaping the entire string and replacing the # with an 
+                # optional digit capture (e.g., 'author', 'author#', author-link# or author#-link).
+                param_pattern = re.escape(old_param).replace(r'\#', r'(\d*)')
                 # Replace matching parameter names in the template content with the updated parameter names.
                 # The `replace_serial_param` function handles the conversion and replacement.
                 template_content = re.sub(rf'\|\s*{param_pattern}\s*=', replace_serial_param, template_content)
