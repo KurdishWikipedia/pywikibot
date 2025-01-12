@@ -18,6 +18,8 @@ Tasks:
 5.  replace_invalid_values: replaces invalid values in parameters with valid values based on the mapping.
 6.  remove_duplicate_parameters: removes duplicate parameters with the same value 
     keeping the last one in the citation template.
+7.  fix_timestamp_mismatch: fixes timestamp mismatch for archive date based on archive URL.
+8.  remove_wikimarkup_from_parameters: removes italic and bold markup from specific parameters' values.
 
 Notes: Each function has it's own summary merging them all at the end.
 """
@@ -109,7 +111,6 @@ class CiteParamUpdaterBot(
                 for old_item in old_items:
                     mapping[old_item] = new_item
         return mapping
-    
     
     def update_parameter_names(self, template_content: str) -> str:
         """Update old parameter names to new ones within a given template content."""
@@ -253,7 +254,14 @@ class CiteParamUpdaterBot(
 
     def convert_numbered_parameter_values(self, template_content: str) -> str:
         """Convert numbers for specific parameters values to Indo-Arabic format."""
-        parameters = ['ساڵ', 'بەرگ', 'ژمارە', 'ژپنک']  # List of parameters to process
+        parameters = [
+             # List of parameters to process
+            'display-authors', 'pmc', 'pmid', 'oclc', 'rfc',
+            'ساڵ', 'بەرگ', 'ژمارە', 'ژپنک',
+            'پ', 'پەڕە', 'پەڕەکان',
+            'ژمارەی زنجیرە', 'وەرز',
+            'دەقە', 'کات'
+            ]
         modified = False  # Track if any modification is made
 
         for param in parameters:
@@ -307,7 +315,9 @@ class CiteParamUpdaterBot(
             (r'([\d٠-٩]{4})[–‒−―—\-\\/‌]([\d٠-٩]{1,2})[–‒−―—\-\\/‌]([\d٠-٩]{1,2})', ('year', 'month', 'day')),  # Format: YYYYsepMMsepDD
             (r'([\d٠-٩]{1,2})[–‒−―—\-\\/‌]([\d٠-٩]{1,2})[–‒−―—\-\\/‌]([\d٠-٩]{4})', ('day', 'month', 'year')),  # Format: DDsepMMsepYYYY
             (r'([A-Za-z]+) (\d{1,2}), (\d{4})', ('month', 'day', 'year')),  # Format: Month DD, YYYY
-            (r'(\d{1,2}) ([A-Za-z]+) (\d{4})', ('day', 'month', 'year'))  # Format: DD Month YYYY
+            (r'(\d{1,2}) ([A-Za-z]+) (\d{4})', ('day', 'month', 'year')),  # Format: DD Month YYYY
+            (r'(\d{4})(\d{2})(\d{2})', ('year', 'month', 'day')),  # For fix_timestamp_mismatch function
+            (r'(\d{1,2})ی ([ئابتحدرزسشلمنوکیە ]+)ی (\d{4})', ('day', 'month', 'year'))  # Only to convert numbers if the day and year are still in Arabic numerals.
         ]
 
         for pattern, group_order in date_patterns:
@@ -362,6 +372,79 @@ class CiteParamUpdaterBot(
             self.generate_edit_summary("بەکوردیکردنی شێوازی ڕێکەوتەکان")
 
         return template_content
+    
+    def fix_timestamp_mismatch(self, template_content: str) -> str:
+        """
+        Fix timestamp mismatch for archive date based on archive URL.
+        https://en.wikipedia.org/wiki/Help:CS1_errors#archive_date_url_ts_mismatch
+        """
+        modified = False  # Flag to track if any modification occurs
+
+        # Find all occurrences of |ناونیشانی ئەرشیڤ=
+        for match in re.finditer(r'\|\s*ناونیشانی ئەرشیڤ\s*=\s*(https?://[^\s|}]+)', template_content):
+            archive_url = match.group(1)
+
+            # Check if the URL contains a 14-digit timestamp and extract the first 8 digits
+            timestamp_match = re.search(r'(\d{8})\d{6}', archive_url)
+            if timestamp_match:
+                timestamp = timestamp_match.group(1)  # Get the first 8 digits (YYYYMMDD)
+
+                # Convert the timestamp to the correct date format
+                fixed_date = self.fix_date_format(timestamp)
+
+                # Find the |ڕێکەوتی ئەرشیڤ= parameter and preserve its original spacing
+                date_pattern = r'(\|\s*ڕێکەوتی ئەرشیڤ\s*=\s*)([^|}]+)'
+                new_template_content = re.sub(
+                    date_pattern,
+                    # Replace the parameter value only if the stripped current value (m.group(2).strip())
+                    # is different from the fixed_date. Otherwise, leave the entire match (m.group(0)) unchanged.
+                    lambda m: f"{m.group(1)}{fixed_date}" if m.group(2).strip() != fixed_date else m.group(0),
+                    template_content
+                )
+
+                # Check if any modification was made
+                if new_template_content != template_content:
+                    template_content = new_template_content  # Update template content
+                    modified = True  # Mark as modified if the content changed
+
+        if modified:
+            self.generate_edit_summary("چاکسازیی ڕێکەوتی ئەرشیڤ")
+        return template_content
+    
+    def remove_wikimarkup_from_parameters(self, template_content: str) -> str:
+        """
+        Remove italic and bold markup from specific parameters' values.
+        https://en.wikipedia.org/wiki/Help:CS1_errors#apostrophe_markup
+        """
+        parameters = [
+            # List of parameters to process
+            'periodical', 'بڵاوکەرەوە', 'ژوورناڵ', 'گۆڤار', 'ڕۆژنامە', 'وێبگە', 'ئیش'
+            ]
+        modified = False  # Track if any modification is made
+
+        for param in parameters:
+            def remove_markup(match):
+                original_value = match.group(2).strip()
+                # Remove italic and bold wikimarkup ('' and ''')
+                cleaned_value = re.sub(r"'''(.*?)'''", r"\1", original_value)  # For bold
+                cleaned_value = re.sub(r"''(.*?)''", r"\1", cleaned_value)  # For italic
+                if cleaned_value != original_value:
+                    nonlocal modified  # Mark that a modification has occurred
+                    modified = True
+                    return f"{match.group(1)}{cleaned_value}"
+                return match.group(0)
+
+            template_content = re.sub(
+                rf'(\|\s*{param}\s*=\s*)([^|}}]+)',
+                remove_markup,
+                template_content
+            )
+
+        if modified:
+            template_content = template_content.strip()  # Strip only if changes were made
+            self.generate_edit_summary("لابردنی ماڕکئەپی ناپێویستی ویکی")
+
+        return template_content
 
     def generate_edit_summary(self, action: str) -> None:
         """Append unique action details to the edit summary."""
@@ -413,6 +496,12 @@ class CiteParamUpdaterBot(
 
                     # Remove duplicate parameters with the same value before replacing the template content
                     template_content = self.remove_duplicate_parameters(template_content)
+
+                    # Fix the timestamp mismatch between |archive-url= and |archive-date=
+                    template_content = self.fix_timestamp_mismatch(template_content)
+
+                    # Remove italic and bold markup from specific parameters' values.
+                    template_content = self.remove_wikimarkup_from_parameters(template_content)
 
                     # Replace the original template content with the updated one
                     text = text.replace(match, template_content)
