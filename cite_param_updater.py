@@ -420,32 +420,35 @@ class CiteParamUpdaterBot(
             # List of parameters to process
             'periodical', 'بڵاوکەرەوە', 'ژوورناڵ', 'گۆڤار', 'ڕۆژنامە', 'وێبگە', 'ئیش'
             ]
+
+        def remove_wikimarkup(value: str) -> str:
+            # Remove both bold (''') and italic ('') wikimarkup
+            value = re.sub(r"'''(.*?)'''", r"\1", value)  # For bold
+            value = re.sub(r"''(.*?)''", r"\1", value)  # For italic
+            return value
+        
         modified = False  # Track if any modification is made
 
         for param in parameters:
-            def remove_markup(match):
-                original_value = match.group(2).strip()
-                # Remove italic and bold wikimarkup ('' and ''')
-                cleaned_value = re.sub(r"'''(.*?)'''", r"\1", original_value)  # For bold
-                cleaned_value = re.sub(r"''(.*?)''", r"\1", cleaned_value)  # For italic
-                if cleaned_value != original_value:
-                    nonlocal modified  # Mark that a modification has occurred
-                    modified = True
-                    return f"{match.group(1)}{cleaned_value}"
-                return match.group(0)
-
-            template_content = re.sub(
-                rf'(\|\s*{param}\s*=\s*)([^|}}]+)',
-                remove_markup,
+            # Refined regex to handle internal/external links with pipes and ensure closing quotes match
+            pattern = rf'(\|\s*{param}\s*=\s*)(\'\'\'?)(.*?)(\'\'\'?)'
+            new_template_content = re.sub(
+                pattern,
+                lambda m: f"{m.group(1)}{remove_wikimarkup(m.group(3).strip())}",
                 template_content
             )
+
+            # Check if any modification was made
+            if new_template_content != template_content:
+                template_content = new_template_content  # Update template content
+                modified = True  # Mark as modified if the content changed
 
         if modified:
             template_content = template_content.strip()  # Strip only if changes were made
             self.generate_edit_summary("لابردنی ماڕکئەپی ناپێویستی ویکی")
 
         return template_content
-
+    
     def generate_edit_summary(self, action: str) -> None:
         """Append unique action details to the edit summary."""
         if not hasattr(self, 'edit_summary'):
