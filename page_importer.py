@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
 """
-This script automates the process of creating pages in a destination Wikimedia project 
-(e.g., Central Kurdish Wiktionary) by copying the latest version of pages from a source 
-Wikimedia project (e.g., English Wiktionary) using Pywikibot.
+This script automates the process of importing pages from a source Wikimedia project 
+(e.g., English Wiktionary) to a destination Wikimedia project (e.g., Central Kurdish Wiktionary) 
+using Pywikibot.
 
 Key Features:
-1. Copies content from the source project and creates new pages in the destination 
-   project if they do not already exist.
-2. Supports importing pages with the same title or a translated title.
-3. Avoids overwriting existing pages in the destination project.
-4. Handles Wikidata connections by linking or creating items for the imported pages 
+1. Copies the latest revision of a page from the source project to the destination project.
+2. Supports importing pages with the same title or a different (translated) title.
+3. Updates existing pages only if the content differs from the source.
+4. Provides edit summaries with a permanent link to the imported revision for transparency.
+5. Handles Wikidata connections by linking or creating items for the imported pages 
    and their source counterparts.
 
-The script does not use the Special:Import page but instead directly copies content 
-via the Pywikibot library. Configuration variables define the source and destination 
-projects, languages, and the list of page titles to process.
+Uses Pywikibot to directly copy content instead of Special:Import.
+Configuration variables define the source and destination projects, languages, and 
+the list of page titles to process.
+
+⚠ Warning:
+You can import pages between different Wikimedia projects (e.g., Wikipedia → Wiktionary), 
+but it's better to avoid it because the generated permanent link may be incorrect. 
+The script does not currently adjust the link format for cross-project imports.
 """
 
 import pywikibot
@@ -32,29 +37,59 @@ page_titles = [
 ]
 
 def import_page(source_site, destination_site, source_page_title, destination_page_title=None):
-    # Function to import a page from the source wiki to the destination wiki
-    destination_page_title = destination_page_title or source_page_title  # Use source title if destination title is not provided
+    '''Import the latest version of page(s) from the source wiki to the destination wiki'''
+    
+    # Use source title if destination title is not provided
+    destination_page_title = destination_page_title or source_page_title
+    # Get the source page
     source_page = pywikibot.Page(source_site, source_page_title)
-    text = source_page.text
+
     # Check if the page exists on the source wiki
     if not source_page.exists():
         print(f"Page '{source_page_title}' does not exist on the source wiki.")
         return
-    # Import the page to the destination wiki if it doesn't already exist
+
+    source_text = source_page.text
+    source_rev_id = source_page.latest_revision_id  # Get the latest revision ID
+
+    # Get the destination page
     destination_page = pywikibot.Page(destination_site, destination_page_title)
+
+    # Construct the permanent link for the edit summary
+    source_permalink = f"[[:{SOURCE_WIKI_LANG}:Special:PermanentLink/{source_rev_id}|{SOURCE_WIKI_LANG}:{source_page_title}]]"
+
+    # Check if the page exists on the destination wiki
     if destination_page.exists():
-        print(f"Page '{destination_page_title}' already exists on the destination wiki. Skipping.")
-        return destination_page
-    try:
-        destination_page.text = text
-        destination_page.save(summary=f"بۆت: لە [[:en:{source_page_title}]] ھاوردە کرا")
-        print(f"Page '{destination_page_title}' imported successfully.")
-        return destination_page
-    except Exception as e:
-        print(f"Failed to import page '{destination_page_title}': {e}")
-        return None
+        destination_text = destination_page.text
+        # Check if the text is already up-to-date
+        if destination_text == source_text:
+            print(f"Page '{destination_page_title}' is already up-to-date. Skipping...")
+            return destination_page
+        else:
+            # Text is different, update it
+            print(f"Updating existing page '{destination_page_title}' on the destination wiki...")
+            try:
+                destination_page.text = source_text
+                destination_page.save(summary=f"بۆت: نوێکردنەوەی ناوەڕۆک بەپێی {source_permalink}")
+                print(f"Page '{destination_page_title}' updated successfully.")
+                return destination_page
+            except Exception as e:
+                print(f"Failed to update page '{destination_page_title}': {e}")
+                return None
+    else:
+        # Page does not exist, create it
+        print(f"Creating new page '{destination_page_title}' on the destination wiki...")
+        try:
+            destination_page.text = source_text
+            destination_page.save(summary=f"بۆت: لە {source_permalink} ھاوردە کرا")
+            print(f"Page '{destination_page_title}' imported successfully.")
+            return destination_page
+        except Exception as e:
+            print(f"Failed to import page '{destination_page_title}': {e}")
+            return None
 
 def handle_wikidata(page, source_page_title, destination_page_title=None):
+    '''Handle Wikidata connections for a given page'''
     # Function to handle Wikidata connection for a given page
     destination_page_title = destination_page_title or source_page_title  # Use source title if destination title is not provided
     source_wiki_page = pywikibot.Page(pywikibot.Site(SOURCE_WIKI_LANG, SOURCE_WIKI_PROJECT), source_page_title)
