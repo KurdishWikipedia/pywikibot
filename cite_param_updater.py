@@ -50,6 +50,31 @@ class CiteParamUpdaterBot(
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+        self.month_map = {
+            'کانوونی دووەم': ['1', '01', 'Jan', 'January', '١', '٠١'],
+            'شوبات': ['2', '02', 'Feb', 'February', '٢', '٠٢'],
+            'ئازار': ['3', '03', 'Mar', 'March', '٣', '٠٣'],
+            'نیسان': ['4', '04', 'Apr', 'April', '٤', '٠٤'],
+            'ئایار': ['5', '05', 'May', '٥', '٠٥'],
+            'حوزەیران': ['6', '06', 'Jun', 'June', '٦', '٠٦'],
+            'تەممووز': ['7', '07', 'Jul', 'July', '٧', '٠٧'],
+            'ئاب': ['8', '08', 'Aug', 'August', '٨', '٠٨'],
+            'ئەیلوول': ['9', '09', 'Sep', 'September', '٩', '٠٩'],
+            'تشرینی یەکەم': ['10', 'Oct', 'October', '١٠'],
+            'تشرینی دووەم': ['11', 'Nov', 'November', '١١'],
+            'کانوونی یەکەم': ['12', 'Dec', 'December', '١٢']
+        }
+
+        kurdish_months = list(self.month_map.keys())  # Get all Kurdish month names
+        self.kurdish_months_pattern = '|'.join(map(re.escape, kurdish_months)) # Create a regex pattern for Kurdish month names
+        
+        self.season_map = {
+            'spring': 'بەھار',
+            'summer': 'ھاوین',
+            'fall': 'پاییز',
+            'winter': 'زستان'
+        }
+
         # Initialize the edit_summary, mapping_dict, template_name_mapping, and invalid_values_mapping
         self.edit_summary = set()  # Use a set to store unique actions
         self.mapping_dict = {}
@@ -288,61 +313,116 @@ class CiteParamUpdaterBot(
 
     def convert_month(self, month: str) -> str:
         """Convert month names or numbers to Kurdish month names."""
-        month_map = {
-            'کانوونی دووەم': ['1', '01', 'Jan', 'January', '١', '٠١'],
-            'شوبات': ['2', '02', 'Feb', 'February', '٢', '٠٢'],
-            'ئازار': ['3', '03', 'Mar', 'March', '٣', '٠٣'],
-            'نیسان': ['4', '04', 'Apr', 'April', '٤', '٠٤'],
-            'ئایار': ['5', '05', 'May', '٥', '٠٥'],
-            'حوزەیران': ['6', '06', 'Jun', 'June', '٦', '٠٦'],
-            'تەممووز': ['7', '07', 'Jul', 'July', '٧', '٠٧'],
-            'ئاب': ['8', '08', 'Aug', 'August', '٨', '٠٨'],
-            'ئەیلوول': ['9', '09', 'Sep', 'September', '٩', '٠٩'],
-            'تشرینی یەکەم': ['10', 'Oct', 'October', '١٠'],
-            'تشرینی دووەم': ['11', 'Nov', 'November', '١١'],
-            'کانوونی یەکەم': ['12', 'Dec', 'December', '١٢']
-        }
-
-        for kurdish_name, representations in month_map.items():
+        for kurdish_name, representations in self.month_map.items():
             if month in representations:
                 return kurdish_name
         return month  # Return the original month if no match is found
 
     def fix_date_format(self, date_str: str) -> str:
         """Convert date formats to the Kurdish format if they match specific patterns."""
+
+        # Define regex patterns for month names and seasons
+        month_pattern = r'(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)'
+        season_pattern = r'(?:Spring|Summer|Fall|Winter)'
+
         # Combine patterns and extraction logic to avoid redundancy
         date_patterns = [
-            (r'([\d٠-٩]{4})[–‒−―—\-\\/‌]([\d٠-٩]{1,2})[–‒−―—\-\\/‌]([\d٠-٩]{1,2})', ('year', 'month', 'day')),  # Format: YYYYsepMMsepDD
-            (r'([\d٠-٩]{1,2})[–‒−―—\-\\/‌]([\d٠-٩]{1,2})[–‒−―—\-\\/‌]([\d٠-٩]{4})', ('day', 'month', 'year')),  # Format: DDsepMMsepYYYY
-            (r'([A-Za-z]+) (\d{1,2}), (\d{4})', ('month', 'day', 'year')),  # Format: Month DD, YYYY
-            (r'(\d{1,2}) ([A-Za-z]+) (\d{4})', ('day', 'month', 'year')),  # Format: DD Month YYYY
-            (r'(\d{4})(\d{2})(\d{2})', ('year', 'month', 'day')),  # For fix_timestamp_mismatch function
-            (r'(\d{1,2})ی ([ئابتحدرزسشلمنوکیە ]+)ی (\d{4})', ('day', 'month', 'year'))  # Only to convert numbers if the day and year are still in Arabic numerals.
+
+            # Season formats
+            (rf'({season_pattern})ی?\s+([\d٠-٩]{{4}})', ('season', 'year')),  # Season YYYY (e.g., Spring 2019)
+            (rf'({season_pattern})ی?\s+([\d٠-٩]{{4}})[–‒−―—\-]([\d٠-٩]{{4}})', ('season', 'year_start', 'year_end')),  # Season YYYY-YYYY (e.g., Spring 2019-2020)
+            
+            # Date formats with separators for day/month/year
+            (r'([\d٠-٩]{4})[–‒−―—\-\\/‌]([\d٠-٩]{1,2})[–‒−―—\-\\/‌]([\d٠-٩]{1,2})', ('year', 'month', 'day')),  # Format: YYYY/MM/DD
+            (r'([\d٠-٩]{1,2})[–‒−―—\-\\/‌]([\d٠-٩]{1,2})[–‒−―—\-\\/‌]([\d٠-٩]{4})', ('day', 'month', 'year')),  # Format: DD/MM/YYYY
+
+            # English month name formats
+            (rf'({month_pattern})\s+(\d{{1,2}}),\s+(\d{{4}})', ('month', 'day', 'year')),  # Format: Month DD, YYYY (e.g., January 15, 2020)
+            (rf'(\d{{1,2}})\s+({month_pattern})\s+(\d{{4}})', ('day', 'month', 'year')),  # Format: DD Month YYYY (e.g., 15 January 2020)
+            (rf'(\d{{4}})-({month_pattern})-(\d{{2}})', ('year', 'month', 'day')),  # Format: YYYY-Mon-DD (e.g., 2020-Jan-15)
+
+            # Special formats
+            (r'(\d{4})(\d{2})(\d{2})', ('year', 'month', 'day')),  # Format: YYYYMMDD (for fix_timestamp_mismatch function)
+            (r'([\d٠-٩]{1,2})ی? (' + self.kurdish_months_pattern + r') ([\d٠-٩]{4})', ('day', 'month', 'year')),  # Kurdish format: Last chance to fix problems in Kurdish dates further.
+
+            # Year-only formats
+            (r'^([\d٠-٩]{4})$', ('year',)),  # Single year (e.g., 2009)
+            (r'^([\d٠-٩]{4})[–‒−―—\-]([\d٠-٩]{4})$', ('year_start', 'year_end')),  # Year range (e.g., 2003-2004)
+
+            # Month-Year combinations
+            (rf'({month_pattern})\s+([\d٠-٩]{{4}})', ('month', 'year')),  # Format: Month YYYY (e.g., August 2019)
+            (rf'({month_pattern})\s+([\d٠-٩]{{4}})[–‒−―—\-]({month_pattern})\s+([\d٠-٩]{{4}})', ('month_start', 'year_start', 'month_end', 'year_end')),  # Month YYYY - Month YYYY
+            (rf'({month_pattern})[–‒−―—\-]({month_pattern})\s+([\d٠-٩]{{4}})', ('month_start', 'month_end', 'year'))  # Month-Month YYYY (e.g., January-March 2020)         
         ]
 
         for pattern, group_order in date_patterns:
-            match = re.match(pattern, date_str)
+            match = re.match(pattern, date_str, re.IGNORECASE)
             if match:
                 groups = match.groups()
-
-                # Dynamically assign year, month, and day based on the group order
                 extracted_values = {group_order[i]: groups[i] for i in range(len(groups))}
-                year = extracted_values.get('year')
-                month = extracted_values.get('month')
-                day = extracted_values.get('day')
 
-                # Convert day and year to Indo-Arabic numbers
-                indo_arabic_day = self.convert_to_indo_arabic_numbers(day)
-                indo_arabic_year = self.convert_to_indo_arabic_numbers(year)
+                # Hanlde season formats first    
+                if 'season' in extracted_values:
+                    season_key = extracted_values['season'].lower()
+                    season = self.season_map.get(season_key)
+                    if season is None:
+                        return date_str  # Return original if season not found
+                    if 'year_end' in extracted_values:  # Season YYYY-YYYY
+                        year_start = self.convert_to_indo_arabic_numbers(extracted_values['year_start'])
+                        year_end = self.convert_to_indo_arabic_numbers(extracted_values['year_end'])
+                        return f"{season}ی {year_start}–{year_end}"
+                    else:  # Season YYYY
+                        year = self.convert_to_indo_arabic_numbers(extracted_values['year'])
+                        return f"{season}ی {year}"
 
-                # Remove leading zero from the Indo-Arabic day
-                indo_arabic_day = re.sub(r'^٠', '', indo_arabic_day)
+                # Handle different date format cases
+                if 'year_start' in extracted_values:  # Date range cases
+                    year_start = self.convert_to_indo_arabic_numbers(extracted_values['year_start'])
+                    year_end = self.convert_to_indo_arabic_numbers(extracted_values['year_end'])
+                    
+                    if 'month_start' in extracted_values:  # Month YYYY - Month YYYY
+                        # Convert both month names to Kurdish
+                        month_start = self.convert_month(extracted_values['month_start'])
+                        month_end = self.convert_month(extracted_values['month_end'])
+                        return f"{month_start}ی {year_start} – {month_end}ی {year_end}"
+                    
+                    return f"{year_start}–{year_end}"  # Simple year range
+                
+                elif 'month_start' in extracted_values:  # Month-Month YYYY
+                    # Convert both month names to Kurdish
+                    month_start = self.convert_month(extracted_values['month_start'])
+                    month_end = self.convert_month(extracted_values['month_end'])
+                    year = self.convert_to_indo_arabic_numbers(extracted_values['year'])
+                    return f"{month_start}–{month_end}ی {year}"
 
-                # Convert month to Kurdish name
-                month_name = self.convert_month(month)
+                elif 'month' in extracted_values and 'year' in extracted_values and 'day' not in extracted_values:
+                    # Month YYYY format
+                    month_name = self.convert_month(extracted_values['month'])
+                    indo_arabic_year = self.convert_to_indo_arabic_numbers(extracted_values['year'])
+                    return f"{month_name}ی {indo_arabic_year}"
 
-                # Return the formatted date in Kurdish
-                return f"{indo_arabic_day}ی {month_name}ی {indo_arabic_year}"
+                elif 'year' in extracted_values and len(extracted_values) == 1:
+                    # Only year format
+                    return self.convert_to_indo_arabic_numbers(extracted_values['year'])
+                
+                else:
+                    # Regular date format with day, month, year
+                    year = extracted_values.get('year')
+                    month = extracted_values.get('month')
+                    day = extracted_values.get('day')
+
+                    # Convert day and year to Indo-Arabic numbers
+                    indo_arabic_day = self.convert_to_indo_arabic_numbers(day)
+                    indo_arabic_year = self.convert_to_indo_arabic_numbers(year)
+
+                    # Remove leading zero from the Indo-Arabic day
+                    indo_arabic_day = re.sub(r'^٠', '', indo_arabic_day)
+
+                    # Convert month to Kurdish name
+                    month_name = self.convert_month(month)
+
+                    # Return the formatted date in Kurdish
+                    return f"{indo_arabic_day}ی {month_name}ی {indo_arabic_year}"
 
         return date_str
 
@@ -418,7 +498,7 @@ class CiteParamUpdaterBot(
         """
         parameters = [
             # List of parameters to process
-            'periodical', 'بڵاوکەرەوە', 'ژوورناڵ', 'گۆڤار', 'ڕۆژنامە', 'وێبگە', 'ئیش'
+            'periodical', 'بڵاوکەرەوە', 'ژوورناڵ', 'گۆڤار', 'ڕۆژنامە', 'وێبگە', 'ئیش', 'بەرھەم'
             ]
 
         def remove_wikimarkup(value: str) -> str:
