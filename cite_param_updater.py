@@ -11,22 +11,26 @@ Parameters supported:
 
 Tasks:
 1.  update_parameter_names: updates old parameter names with a new one.
-2.  remove_empty_parameters: removes empty parameters from citations.
-3.  convert_numbered_parameter_values: using a list inside the function
+2.  fix_missing_titles: extracts and adds missing titles from URLs using Citoid API.
+3.  remove_empty_parameters: removes empty parameters from citations.
+4.  convert_numbered_parameter_values: using a list inside the function
     to convert their numbers such as: isbn, year, volume, page etc. values.
-4.  fix_date_parameters: fix date formats for specific parameters only if they match predefined patterns.
-5.  replace_invalid_values: replaces invalid values in parameters with valid values based on the mapping.
-6.  remove_duplicate_parameters: removes duplicate parameters with the same value 
+5.  fix_date_parameters: fix date formats for specific parameters only if they match predefined patterns.
+6.  replace_invalid_values: replaces invalid values in parameters with valid values based on the mapping.
+7.  remove_duplicate_parameters: removes duplicate parameters with the same value 
     keeping the last one in the citation template.
-7.  fix_timestamp_mismatch: fixes timestamp mismatch for archive date based on archive URL.
-8.  remove_wikimarkup_from_parameters: removes italic and bold markup from specific parameters' values.
+8.  fix_timestamp_mismatch: fixes timestamp mismatch for archive date based on archive URL.
+9.  remove_wikimarkup_from_parameters: removes italic and bold markup from specific parameters' values.
 
 Notes: Each function has it's own summary merging them all at the end.
 """
 
 import re
+import requests
+import time
 import pywikibot
 from pywikibot import pagegenerators
+from urllib.parse import urlparse, quote
 from pywikibot.bot import (
     SingleSiteBot,
     ConfigParserBot,
@@ -74,6 +78,26 @@ class CiteParamUpdaterBot(
             'fall': 'پاییز',
             'winter': 'زستان'
         }
+
+        self.last_request_time = 0  # For rate limiting web requests
+        self.request_delay = 2      # Delay in seconds between requests
+
+        # Social, login, and known-bot-blocking domains
+        self.skip_domains = [
+            # Kurdish domains
+            'rudaw.net',
+            # Social networks
+            'linkedin.com', 'pinterest.com', 'reddit.com', 'tiktok.com',
+            'weibo.com', 'tumblr.com', 'snapchat.com', 'vk.com',
+            # Messaging & chat
+            'messenger.com', 'web.whatsapp.com', 'discord.com',
+            'slack.com', 'telegram.org', 'signal.org', 'skype.com',
+            # Login & mail
+            'accounts.google.com', 'mail.yahoo.com', 'mail.google.com',
+            'outlook.com', 'hotmail.com', 'protonmail.com', 'icloud.com',
+            # Bot protection/CDN
+            'cloudflare.com', 'akamai.com', 'sucuri.net', 'imperva.com'
+        ]
 
         # Initialize the edit_summary, mapping_dict, template_name_mapping, and invalid_values_mapping
         self.edit_summary = set()  # Use a set to store unique actions
@@ -170,6 +194,112 @@ class CiteParamUpdaterBot(
         if template_content != original_content:
             template_content = template_content.strip()
             self.generate_edit_summary("ناوی پارامەترە کۆنەکان نوێ کرایەوە")
+
+        return template_content
+    
+    def sanitize_title(self, title: str) -> str:
+        """Escape special characters in title for template use and clean up formatting."""
+        if not title:
+            return ''
+        
+        # Clean up all whitespace sequences (including newlines) into single spaces
+        title = re.sub(r'\s+', ' ', title)
+        
+        # Escape special characters
+        title = title.strip().replace('|', '{{!}}').replace('=', '{{=}}')
+        
+        return title
+    
+    def should_skip_url(self, url: str) -> bool:
+        """Return True if the URL's domain matches a skip domain (exact or subdomain)."""
+        domain = urlparse(url).netloc.lower().split(':')[0]  # Strip port if present
+        for skip in self.skip_domains:
+            if domain == skip or domain.endswith('.' + skip):
+                return True
+        return False
+
+    def extract_title_from_url(self, url: str) -> str:
+        """Extract title from a webpage URL using Citoid API."""
+        if self.should_skip_url(url):
+            pywikibot.warning(f"Skipped extracting title for skipped domain: {url}")
+            return None
+
+        try:
+            # Rate limiting
+            current_time = time.time()
+            if current_time - self.last_request_time < self.request_delay:
+                time.sleep(self.request_delay)
+            self.last_request_time = time.time()
+
+            # Use Citoid API to get citation data
+            encoded_url = quote(url, safe='')
+            api_url = f'https://ckb.wikipedia.org/api/rest_v1/data/citation/mediawiki/{encoded_url}'
+            response = requests.get(api_url, timeout=15)
+            
+            try:
+                data = response.json()
+                # First check if it's an error response
+                if isinstance(data, dict) and 'Error' in data:
+                    pywikibot.warning(f"Citoid error for {url}: {data['Error']}")
+                    return None
+
+                # Then check HTTP status and valid citation data
+                if response.status_code == 200 and isinstance(data, list) and data:
+                    title = data[0].get('title')
+                    if title:
+                        return self.sanitize_title(title)
+                    else:
+                        pywikibot.warning(f"title is missing/empty in Citoid data for: {url}")
+                else:
+                    pywikibot.warning(f"Failed to fetch from Citoid (HTTP {response.status_code}): {url}")
+                return None
+
+            except ValueError:  # JSON decode error
+                pywikibot.warning(f"Invalid JSON response from Citoid for {url}")
+                return None
+
+        except Exception as e:
+            pywikibot.warning(f"Failed to extract title from {url}: {str(e)}")
+            return None
+
+    def fix_missing_titles(self, template_content: str) -> str:
+        """Fix missing titles in citations by extracting them from URLs."""
+        modified = False
+
+        # Find URL parameter
+        url_match = re.search(r'\|\s*ناونیشان\s*=\s*([^|}]+)', template_content)
+        if not url_match:
+            return template_content
+
+        url = url_match.group(1).strip()
+        
+        # Check if title parameter exists and is empty or missing
+        title_match = re.search(r'\|\s*سەردێڕ\s*=\s*([^|}]*)', template_content)
+        
+        if not title_match or not title_match.group(1).strip():
+            # Try to extract title from URL
+            extracted_title = self.extract_title_from_url(url)
+            
+            if extracted_title:
+                if title_match:
+                    # Replace empty title
+                    template_content = re.sub(
+                        r'(\|\s*سەردێڕ\s*=\s*)([^|}]*)',
+                        rf'\1{extracted_title}',
+                        template_content
+                    )
+                else:
+                    # Add new title parameter after URL
+                    template_content = re.sub(
+                        rf'(\|\s*ناونیشان\s*=\s*{re.escape(url)})',
+                        rf'\1|سەردێڕ={extracted_title}',
+                        template_content
+                    )
+                modified = True
+
+        if modified:
+            template_content = template_content.strip()
+            self.generate_edit_summary("زیادکردنی سەردێڕی ون")
 
         return template_content
 
@@ -564,6 +694,9 @@ class CiteParamUpdaterBot(
 
                     # Update old parameter names with the new one within the matched template
                     template_content = self.update_parameter_names(template_content)
+
+                    # Fix missing titles in citations
+                    template_content = self.fix_missing_titles(template_content)
                         
                     # Remove empty parameters if the option is set
                     if self.opt.remove_empty:
