@@ -1,24 +1,18 @@
-# Pywikibot  
+# Unofficial Pywikibot Scripts
 
-Welcome to **Pywikibot**, a set of **unofficial scripts** originally created for the [Central Kurdish Wikipedia](https://ckb.wikipedia.org). These tools are designed to simplify editing and maintaining pages across Wikimedia projects, with a primary focus on Wikipedia. Learn more about Pywikibot from the official [Pywikibot manual on MediaWiki](https://www.mediawiki.org/wiki/Manual:Pywikibot).  
+This repository contains a collection of unofficial Pywikibot scripts, primarily developed for the [Central Kurdish Wikipedia](https://ckb.wikipedia.org). They are designed to automate repetitive editing tasks.
 
-## Features  
-- Tailored for [Central Kurdish Wikipedia](https://ckb.wikipedia.org).  
-- Automates repetitive tasks to save time and reduce errors.  
-- Extensible and adaptable to various Wikimedia projects.  
+For the official framework, see the [Pywikibot manual on MediaWiki](https://www.mediawiki.org/wiki/Manual:Pywikibot) or the [official GitHub repository](https://github.com/wikimedia/pywikibot).
 
----
+## Usage
 
-### DISCLAIMER AND WARNINGS  
+These scripts are extensions and will not run on their own. They must be placed within a Pywikibot installation to function.
 
-**THIS IS NOT THE MAIN PYWIKIBOT REPOSITORY.**  
-This repository contains a collection of **unofficial scripts** created to enhance and automate tasks for Wikimedia projects.  
+*   **Local Machine:** Move the script files into your `pywikibot-core/scripts/userscripts/` directory.
+*   **Toolforge:** Store them in a separate folder (e.g., `$HOME/pywikibot-custom-scripts`) to protect them from being deleted during core updates from scratch.
 
-For the official Pywikibot repository and its core scripts, please visit the [official Pywikibot GitHub repository](https://github.com/wikimedia/pywikibot).  
+Once placed correctly, you can run them like any other Pywikibot script.
 
-**THESE SCRIPTS COME WITH NO WARRANTY. USE AT YOUR OWN RISK.**  
-The authors and contributors of these scripts shall not be held responsible for any damages, losses, or legal issues arising from their use. Please ensure compliance with Wikimedia's editing guidelines and policies.  
+## Disclaimer
 
----
-
-Feel free to suggest improvements or contribute to the project. Happy editing!  
+**These scripts are unofficial and come with no warranty.** You are responsible for all edits performed. Always test thoroughly and ensure your bot's actions comply with all relevant Wikimedia policies.
