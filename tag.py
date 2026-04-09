@@ -65,7 +65,7 @@ from __future__ import annotations
 
 import pywikibot
 from pywikibot.comms import http
-from pywikibot.textlib import extract_sections
+from pywikibot.textlib import extract_sections, getCategoryLinks
 from pywikibot import pagegenerators
 from pywikibot.bot import (
     ConfigParserBot,
@@ -465,8 +465,15 @@ class TagBot(
         return total_sources, num_refs, num_citations
 
     def count_visible_categories(self, page):
-        """Count the number of non-hidden categories on the page."""
-        non_hidden_categories = [cat for cat in page.categories() if not cat.isHiddenCategory()]
+        """Count the number of non-hidden categories in the page wikitext."""
+        cats_in_text = getCategoryLinks(page.text, self.site)
+        if not cats_in_text:
+            return 0
+
+        # Batch-preload properties to check 'hidden' status efficiently.
+        preloaded_cats = self.site.preloadpages(cats_in_text, pageprops=True)
+        
+        non_hidden_categories = [cat for cat in preloaded_cats if not cat.isHiddenCategory()]
         num_categories = len(non_hidden_categories)
         return num_categories
 
