@@ -46,25 +46,25 @@ TAG_DEFINITIONS = {
 # Falls back to 'en' if the site language is not defined here.
 SUMMARY_MESSAGES = {
     'en': {
-        'bot_prefix': 'Bot: ',
+        'bot_prefix': 'Bot',
         'adding': 'Adding',
         'removing': 'Removing',
         'tag': 'tag',
         'tags': 'tags',
-        'and': ' and ',
-        'comma_separator': ', ',
-        'separator': '; ',
+        'and': 'and',
+        'comma_separator': ',',
+        'separator': ';',
         'template_ns': 'Template',
     },
     'ckb': {
-        'bot_prefix': 'بۆت: ',
+        'bot_prefix': 'بۆت',
         'adding': 'زیادکردنی',
         'removing': 'لابردنی',
         'tag': 'تاگی',
         'tags': 'تاگەکانی',
-        'and': ' و ',
-        'comma_separator': '، ',
-        'separator': '؛ ',
+        'and': 'و',
+        'comma_separator': '،',
+        'separator': '؛',
         'template_ns': 'داڕێژە',
     },
 }
@@ -123,6 +123,7 @@ LAYOUT_TEMPLATES_BY_PRIORITY = [
     'Q5626124', # Template:Featured article
     'Q5303', # Template:Good article
     # Speedy deletion tags
+    'Q4847311', # Template:Db
     'Q6535594', # Template:Db-g1
     'Q10954700', # Template:Db-g2
     'Q10988846', # Template:Db-g3

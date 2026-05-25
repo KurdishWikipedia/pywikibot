@@ -109,6 +109,13 @@ class TagBot(
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+        # Ensure the bot is logged in on both the target wiki and Wikidata.
+        self.repo = self.site.data_repository()
+        logged_out_sites = [str(s) for s in [self.site, self.repo] if not s.logged_in()]
+        if logged_out_sites:
+            pywikibot.error(f"Login required on: {', '.join(logged_out_sites)}")
+            sys.exit(1)
+
         pywikibot.info("Initializing bot: Fetching and caching template data...")
 
         # Compile a master list of all QIDs to fetch.
@@ -245,7 +252,7 @@ class TagBot(
 
         # Perform all removals on the full text first.
         for tag in set(tags_to_remove):
-            pattern = r"\{\{\s*" + self.case_insensitive_first_letter(tag) + r"\s*\|?[^}]*?\}\}\n?"
+            pattern = r"\{\{\s*" + self.case_insensitive_first_letter(tag) + r"\s*\|?(?:\{\{.*?\}\}|[^\{\}])*?\}\}\n?"
             newtext = re.sub(pattern, "", newtext, flags=re.IGNORECASE)
 
         # Separate the MODIFIED text into parts.
@@ -482,28 +489,26 @@ class TagBot(
     # =========================================================================
 
     def handle_templates_above_top_tags(self, header):
-        """Identify and sort templates above top tags based on predefined QID order."""
-        # Find and extract templates above tags one by one using their patterns
+        """Identify and sort layout templates above top tags based on predefined QID order."""
         templates_above_tags = []
-        for qid, pattern in self.qid_patterns.items():
-            matches = list(re.finditer(pattern, header))
+        remaining_header = header
+
+        # Iterate by QID priority and extract matching templates from the header.
+        for qid in self.layout_templates_by_qid.keys():
+            pattern = self.qid_patterns.get(qid)
+            if not pattern:
+                continue
+
+            # Search in the remaining header to avoid double-matching the same text.
+            matches = list(re.finditer(pattern, remaining_header))
             for match in matches:
                 template = match.group()
                 templates_above_tags.append((qid, template))
-
-        # Sort the list of templates above tags based on the order of QIDs
-        templates_above_tags.sort(key=lambda item: list(self.layout_templates_by_qid.keys()).index(item[0]))
-
-        # Initialize remaining header with original header because we need a new variable to get
-        # remaining lines below added top tags and can not work with header directly
-        remaining_header = header
-
-        # Remove sorted templates from header
-        for qid, template in templates_above_tags:
-            remaining_header = remaining_header.replace(template, '') # Remove all occurrences of above templates
+                # Remove this specific occurrence from the header.
+                remaining_header = remaining_header.replace(template, '', 1)
 
         # Construct the string of sorted templates
-        sorted_templates = [item[1] for item in templates_above_tags]
+        sorted_templates = [f"{item[1].rstrip()}\n" for item in templates_above_tags]
         sorted_templates_str = ''.join(sorted_templates) if sorted_templates else ''
 
         # Return both sorted templates string and remaining header
@@ -558,7 +563,7 @@ class TagBot(
             prefix = msgs['tag'] if len(links) == 1 else msgs['tags']
             summary_parts.append(f"{msgs['removing']} {prefix} {self.make_sentence(links, msgs)}")
     
-        edit_summary = msgs['separator'].join(summary_parts)
+        edit_summary = f"{msgs['separator']} ".join(summary_parts)
     
         # Handle command-line summary options
         if self.opt.reason and self.opt.summary:
@@ -572,7 +577,7 @@ class TagBot(
     
         # Add the bot prefix only if a summary was actually generated.
         if edit_summary:
-            edit_summary = msgs['bot_prefix'] + edit_summary
+            edit_summary = f"{msgs['bot_prefix']}: {edit_summary}"
     
         # Shorten summary if it exceeds the character limit
         if len(edit_summary) > 499:
@@ -587,8 +592,9 @@ class TagBot(
         if len(items) == 1:
             return items[0]
         if len(items) == 2:
-            return f"{items[0]}{msgs['and']}{items[1]}"
-        return msgs['comma_separator'].join(items[:-1]) + f"{msgs['and']}{items[-1]}"
+            return f"{items[0]} {msgs['and']} {items[1]}"
+        comma_sep = f"{msgs['comma_separator']} "
+        return comma_sep.join(items[:-1]) + f" {msgs['and']} {items[-1]}"
     
     def make_template_link(self, tag: str, msgs: dict) -> str:
         """Create a formatted link to a template for the summary."""
@@ -610,13 +616,14 @@ class TagBot(
         if not qids:
             return {}
             
-        url = (f"https://www.wikidata.org/w/api.php?"
-               f"action=wbgetentities&ids={'|'.join(qids)}&props=sitelinks"
-               f"&languages={language}&format=json")
         try:
-            response = http.fetch(url)
-            response.raise_for_status()
-            data = response.json()
+            # Fetch sitelinks for a list of Wikidata QIDs in a single API call.
+            request = self.repo.simple_request(
+                action='wbgetentities',
+                ids='|'.join(qids),
+                props='sitelinks'
+            )
+            data = request.submit()
         except Exception as e:
             pywikibot.error(f"Could not fetch titles from Wikidata: {e}")
             return {}
